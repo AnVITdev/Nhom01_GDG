@@ -39,36 +39,56 @@ Kích hoạt môi trường:
 pip install -r requirements.txt
 ```
 
-#### ⚠️ Các lỗi thường gặp khi cài đặt và cách khắc phục:
+#### Các lỗi thường gặp khi chạy file ban đầu, nguyên nhân và cách khắc phục:
 
-1. **Lỗi `Microsoft Visual C++ 14.0 or greater is required` khi build wheel cho `greenlet` / `daal`:**
-   - **Nguyên nhân:** Máy Windows chưa cài C++ Build Tools nên pip cố gắng compile mã nguồn C/C++.
-   - **Cách sửa:** Ép pip chỉ tải bản pre-compiled binary (wheel đã build sẵn):
+1. Lỗi UnicodeDecodeError: 'charmap' codec can't decode byte ...
+   - Nguyên nhân: File notebook gọi "from ipynb.fs.defs.preprocessing import get_data". Trên hệ điều hành Windows, thư viện "ipynb" khi đọc file notebook khác mặc định sử dụng bảng mã hệ thống (CP1252 / charmap) thay vì UTF-8. Nếu trong file notebook tiền xử lý có chứa ký tự tiếng Việt hoặc ký tự đặc biệt, lệnh load JSON của thư viện sẽ bị sập ngay lập tức.
+   - Cách sửa: Không phụ thuộc vào "ipynb.fs.defs". Toàn bộ hàm tiền xử lý và nạp dữ liệu get_data() được chuyển vào file Python thuần túy "util.py" hoặc viết trực tiếp trong file mã nguồn. Ngoài ra, các notebook được lưu theo chuẩn UTF-8 / ASCII escape để tránh lỗi mở file trên Windows.
+
+2. Lỗi NameError: name 'cb' is not defined và name 'thresholds' is not defined
+   - Nguyên nhân: 
+     + Biến 'cb' bị lỗi do Cell 1 phía trên gặp lỗi UnicodeDecodeError nên lệnh "import catboost as cb" chưa từng được nạp vào bộ nhớ. Khi bấm chạy các cell phía dưới, Python sẽ báo NameError: name 'cb' is not defined.
+     + Biến 'thresholds' bị lỗi khi người dùng chạy nhảy cóc cell hoặc cell tính toán dò ngưỡng chưa hoàn tất nhưng đã thực thi cell vẽ đồ thị ở bên dưới.
+   - Cách sửa:
+     + Khắc phục triệt để lỗi nạp dữ liệu ở Cell 1. Đồng thời khai báo import trực tiếp "import catboost as cb", "import lightgbm as lgb", "import xgboost as xgb" ngay tại cell huấn luyện.
+     + Bổ sung cơ chế tự khởi tạo dự phòng cho 'thresholds' và 'opt_threshold' ngay trong cell vẽ đồ thị nếu biến chưa tồn tại trong bộ nhớ.
+
+3. Lỗi chỉ số PaySim thấp (PR-AUC chỉ đạt ~0.29 thay vì ~0.86 như trên Colab)
+   - Nguyên nhân: 
+     + Sử dụng tham số sample_size nhỏ (ví dụ 100,000 dòng ngẫu nhiên) làm phá vỡ các đặc trưng chuỗi thời gian tích lũy của PaySim (như đếm số lần giao dịch tới tài khoản đích, giao dịch trùng bước thời gian).
+     + Sử dụng trọng số phạt mất cân bằng scale_pos_weight quá lớn cho mô hình cây phức tạp khiến mô hình đoán nhầm rất nhiều giao dịch thường thành gian lận (Recall cao ~99% nhưng Precision tụt xuống ~9%, kéo PR-AUC xuống thấp).
+   - Cách sửa: 
+     + Chạy trên toàn bộ dữ liệu 2.77 triệu dòng PaySim (lọc 2 loại giao dịch có gian lận là TRANSFER và CASH_OUT, loại bỏ 4 cột số dư để chống rò rỉ dữ liệu).
+     + Áp dụng mô hình "XGBoost No Scale" với tham số tree_method="hist". Thời gian huấn luyện trên CPU máy tính chỉ mất khoảng 30 giây và tái lập chính xác 100% kết quả trên Colab (PR-AUC đạt 0.8642, F1-Score đạt 0.8338, ROC-AUC đạt 0.9964).
+
+4. Lỗi VS Code hiện chữ M, dấu chấm tròn và lỗi "Could not register service worker: InvalidStateError"
+   - Nguyên nhân: 
+     + Dấu chấm tròn bên cạnh tên file và chữ M thể hiện tab notebook trong VS Code đang có nội dung chỉnh sửa chưa lưu trong bộ nhớ đệm, dẫn đến xung đột khi file trên ổ đĩa được cập nhật từ bên ngoài.
+     + Thông báo "Could not register service worker" xuất hiện khi tiến trình nền (Extension Host) của VS Code bị crash nhiều lần liên tiếp, làm tê liệt giao diện hiển thị webview của Jupyter Notebook.
+   - Cách sửa:
+     + Đóng các tab notebook có dấu chấm tròn (chọn Don't Save để tránh ghi đè nội dung cũ lên ổ đĩa).
+     + Nhấn tổ hợp phím Ctrl + Shift + P, gõ và chọn lệnh "Developer: Reload Window" để khởi động lại bộ nhớ đệm ServiceWorker của VS Code.
+     + Mỗi thư mục đều đã được bổ sung file mã nguồn Python độc lập tương ứng (optimal_method.py). Có thể chạy trực tiếp bằng dòng lệnh terminal (ví dụ: py -3.13 notebooks/paysim/optimal_method.py) mà không cần mở qua giao diện Jupyter của VS Code.
+
+5. Lỗi Microsoft Visual C++ 14.0 or greater is required khi build wheel cho greenlet / daal:
+   - Nguyên nhân: Máy Windows chưa cài C++ Build Tools nên pip cố gắng compile mã nguồn C/C++.
+   - Cách sửa: Ép pip chỉ tải bản pre-compiled binary (wheel đã build sẵn):
      ```bash
      pip install --only-binary :all: greenlet
      # hoặc ép tải binary cho tất cả packages:
      pip install --only-binary :all: -r requirements.txt
      ```
 
-2. **Lỗi `ModuleNotFoundError: No module named 'sklearnex'`:**
-   - **Nguyên nhân:** File `baseline.ipynb`, `threshold.ipynb` gọi `from sklearnex import patch_sklearn` từ thư viện Intel Extension for Scikit-learn.
-   - **Cách sửa:**
+6. Lỗi ModuleNotFoundError: No module named 'sklearnex':
+   - Nguyên nhân: File baseline.ipynb, threshold.ipynb gọi from sklearnex import patch_sklearn từ thư viện Intel Extension for Scikit-learn.
+   - Cách sửa:
      ```bash
      pip install scikit-learn-intelex
      ```
 
-3. **Lỗi Jupyter Kernel Crash khi chạy file `.ipynb`:**
-   - **Nguyên nhân:** Thiếu backend `ipykernel` hoặc `ipynb` trong virtual environment.
-   - **Cách sửa:**
-     ```bash
-     pip install ipykernel ipynb
-     python -m ipykernel install --user --name=nhom01-gdg-venv --display-name "Python (nhom01-gdg-venv)"
-     ```
-     *(Sau đó khi mở notebook trong VS Code, bấm chọn Kernel ở góc trên cùng bên phải và chọn **Python (nhom01-gdg-venv)**).*
-
-4. **Lỗi `FileNotFoundError: '../../data/credit_card/creditcard.csv'`:**
-   - **Nguyên nhân:** Đường dẫn tương đối `../../data` yêu cầu thư mục `data` nằm ngoài thư mục cha của notebook.
-   - **Cách sửa:** Đảm bảo thư mục `data/` chứa dữ liệu csv đã được tải về. Nếu chạy từ notebook con, hãy copy hoặc tạo thư mục `data` ở cấp thư mục ngang hàng dự án hoặc chạy script [kaggle.ipynb](file:///notebooks/kaggle.ipynb).
+7. Lỗi FileNotFoundError đối với đường dẫn dữ liệu CSV:
+   - Nguyên nhân: Sử dụng đường dẫn tương đối ../../data phụ thuộc vào thư mục làm việc hiện tại khi chạy notebook.
+   - Cách sửa: Cập nhật hàm nạp dữ liệu tự động dò tìm đường dẫn dữ liệu qua danh sách các vị trí khả dĩ ('../../data', '../data', 'data') để chạy từ bất kỳ thư mục con nào cũng tìm thấy file CSV.
 
 ---
 
